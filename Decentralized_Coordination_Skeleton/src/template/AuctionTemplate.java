@@ -19,6 +19,8 @@ import logist.task.TaskSet;
 import logist.topology.Topology;
 import logist.topology.Topology.City;
 
+import static algorithms.AStar.aStarPlan;
+
 /**
  * A very simple auction agent that assigns all tasks to its first vehicle and
  * handles them sequentially.
@@ -31,11 +33,12 @@ public class AuctionTemplate implements AuctionBehavior {
 	private TaskDistribution distribution;
 	private Agent agent;
 	private Random random;
-	private Vehicle vehicle;
+	private List<Vehicle> vehicles;
 	private City currentCity;
 	private long currentCost;
 	private List<Task> currentTasks;
 	private long averageCostPerKm;
+	private List<List<PD_Action>> plans;
 
 	private long timeout_setup;
 	private long timeout_plan;
@@ -50,8 +53,8 @@ public class AuctionTemplate implements AuctionBehavior {
 		this.topology = topology;
 		this.distribution = distribution;
 		this.agent = agent;
-		this.vehicle = agent.vehicles().get(0);
-		this.currentCity = vehicle.homeCity();
+		this.vehicles = agent.vehicles();
+		this.currentCity = vehicles.get(0).homeCity();
         this.currentTasks = (agent.getTasks() != null) ? agent.getTasks().stream().toList() : new ArrayList<>();
 
         long seed = -9019554669489983951L * currentCity.hashCode() * agent.id();
@@ -98,8 +101,8 @@ public class AuctionTemplate implements AuctionBehavior {
 
 	@Override
 	public Long askPrice(Task task) {
-
-		if (vehicle.capacity() < task.weight)
+		// TODO: decide over all of our vehicles
+		if (vehicles.get(0).capacity() < task.weight)
 			return null;
 
 		// ALWAYS BID - if not interesting bid will just be very high - else reject = null
@@ -130,7 +133,7 @@ public class AuctionTemplate implements AuctionBehavior {
 	private double calculateEquilibriumBid(Task task) {
 		// Extract relevant parameters
 		double n = agent.vehicles().size(); // TODO: update to Number of bidders
-		double c = vehicle.costPerKm();    // Cost of doing a job
+		double c = averageCostPerKm;    // Cost of doing a job
 
 		double equilibriumBid = calculateRationalBid(task);
 
@@ -299,10 +302,103 @@ public class AuctionTemplate implements AuctionBehavior {
 		return costWithNewTask - costWithoutNewTask;
 	}
 
+	// TODO: update - relation Candidate!
+	public State generateInitialState (Vehicle vehicle, TaskSet available) {
+		if (currentTasks == null || this.currentTasks.isEmpty()) {
+			return new State (vehicle, available);
+		} else {
+			TaskSet stateCarriedTasks = (TaskSet) this.currentTasks;
+			this.currentTasks.clear();
+			return new State(vehicle, available, stateCarriedTasks);
+		}
+	}
+
+	// TODO: maybe change to create from oldCandidate? Does saving old states bring us an advantage?
+	public Candidate stateToCandidate(State state, List<Task> tasks, Vehicle vehicle) {
+
+		int num_vehicles = vehicles.size();
+
+		List<List<PD_Action>> plans = new ArrayList<>();
+		List<List<Task>> taskLists = new ArrayList<>();
+		List<Task> allTasks = new ArrayList<>(tasks);
+
+
+// initialize plans and task list
+		for (int i = 0; i < num_vehicles; i++) {
+			plans.add(new ArrayList<>());
+			taskLists.add(new ArrayList<>());
+		}
+
+
+// Assign all the tasks to the largest vehicle
+		for (Task t : state.getCarriedTasks()) {
+
+			List<PD_Action> plan = plans.get(vehicles.indexOf(vehicle));
+			List<Task> tasks_vehicle = taskLists.get(vehicles.indexOf(vehicle));
+
+			// Add tasks to the end of current plan
+			plan.add(new PD_Action(true, t));
+			plan.add(new PD_Action(false, t));
+
+			tasks_vehicle.add(t);
+		}
+
+// calculate the cost of initial candidate solution
+		double initial_cost = 0.0;
+		// accumulate the cost borne by each vehicle
+		for (int i = 0; i < vehicles.size(); i++) {
+			initial_cost += ComputeCost(vehicles.get(i), plans.get(i));
+		}
+
+		Candidate Some_Solution = new Candidate(vehicles, plans, taskLists, initial_cost);
+
+// Return the generated initial candidate solution
+		return Some_Solution;
+	}
+
+	private static double ComputeCost(Vehicle v, List<PD_Action> plan) {
+
+		double cost = 0.0;
+
+		// Follow the cities on the list of actions
+		City current_city = v.getCurrentCity();
+
+		for (PD_Action act : plan) {
+
+			// add the cost to travel to the city
+			if(act.is_pickup) {
+				cost = cost + current_city.distanceTo(act.task.pickupCity) * v.costPerKm();
+				current_city = act.task.pickupCity;
+			}
+			else {
+				cost = cost + current_city.distanceTo(act.task.deliveryCity) * v.costPerKm();
+				current_city = act.task.deliveryCity;
+			}
+
+		}
+
+		return cost;
+	}
+
+	// TODO: here plan is just list of pd_actions - convert aStar plan to that?
+
 	// TODO: calculate new Cost - should current cost be a variable? How to calculate the cost?
 	private long calculatePlanCost(List<Task> tasks) {
-		long cost = currentCost +1;
+		// TODO: should it be max?
+		long cost = currentCost + distribution.weight(tasks.get(0).pickupCity, tasks.get(0).deliveryCity);
+		for (Vehicle v: this.vehicles) {
+			// can we do that? (TaskSet conversion)
+			State currentState = generateInitialState(v, (TaskSet) tasks);
+			Plan plan = aStarPlan(v, (TaskSet) tasks, currentState);
+			// TODO: why null pointer and not 0
+			cost = (long) plan.totalDistance()*v.costPerKm();
+			// TODO: convert plan to candidate!!
+			// List<List<PD_Action>> tmpPlans =
+			// Candidate c = new Candidate(vehicles, plans.get(vehicles.indexOf(v)), tasks, currentCost);
+
+		}
 		// TODO: write function that computes most efficient path and therefore its cost - AStar?
+		// compute best AStar solution and return its cost as "approximate" - how to include different vehicles?
 		// if tasks == null return currentCost
 		return cost;
 	}
