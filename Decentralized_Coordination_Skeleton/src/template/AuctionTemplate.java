@@ -36,6 +36,10 @@ public class AuctionTemplate implements AuctionBehavior {
 	private List<Vehicle> vehicles;
 	private City currentCity;
 	private long currentCost;
+	// save current Solution
+	private Candidate currentSolution;
+	// save next Bid Solution
+	private Candidate nextBidSolution;
 	private List<Task> currentTasks;
 	private long averageCostPerKm;
 	private List<List<PD_Action>> plans;
@@ -104,6 +108,37 @@ public class AuctionTemplate implements AuctionBehavior {
 		// TODO: decide over all of our vehicles
 		if (vehicles.get(0).capacity() < task.weight)
 			return null;
+
+		if (this.currentTasks.isEmpty()) {
+			this.nextBidSolution = EstimateSolutionStrategy.addFirstTaskToSolution(new Candidate(currentSolution));
+		}
+		// if bid time is not long enough for our strategy agent bids the approximated maximal marginal cost
+		else if (bidTimeout < BID_ESTIMATED_TIME) {
+			nextBidSolution = EstimateSolutionStrategy.addTaskToEnd(new Candidate(currentSolution));
+
+			long distance = (long) (agentsBidStrategy.getBiggestCityDistance() +
+					task.pickupCity.distanceTo(task.deliveryCity));
+			long marginalCost = (long) (distance * shortBidTimeoutDiscount * this.approximatedVehicleCost);
+			this.maxMarginalCost = Math.max(marginalCost, maxMarginalCost);
+			return marginalCost;
+		}
+		// create best next solution if agent receives the auction task
+		else {
+			nextBidSolution = EstimateSolutionStrategy.optimalSolutionWithTask(new Candidate(currentSolution));
+		}
+
+		long marginalCost = (long) (nextBidSolution.cost - currentSolution.cost);
+		this.maxMarginalCost = Math.max(marginalCost, maxMarginalCost);
+		System.out.println("\nMarginal cost: " + marginalCost);
+
+		Long myBid = agentsBidStrategy.calculateMyBid(task, marginalCost);
+		myBid = taskDistributionStrategy.refineBid(task, marginalCost, myBid);
+
+		if (myBid <= 1) {
+			myBid = (long) (this.shortBidTimeoutDiscount *
+					task.pickupCity.distanceTo(task.deliveryCity) * this.approximatedVehicleCost);
+		}
+		return myBid;
 
 		// ALWAYS BID - if not interesting bid will just be very high - else reject = null
 

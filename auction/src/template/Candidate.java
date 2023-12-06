@@ -1,12 +1,9 @@
 package template;
+import java.util.*;
 
 import logist.simulation.Vehicle;
 import logist.task.Task;
 import logist.topology.Topology.City;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
 
 
 //The Candidate class holds a conceptual candidate solution and methods associated with it.
@@ -14,9 +11,11 @@ import java.util.Random;
 public class Candidate {
 	
 public Double cost;	// cost of the plan
-public final List<Vehicle> vehicles;	// list of vehicles
-public final List<List<PD_Action>> plans;	// lists of plans for each vehicle
-public final List<List<Task>> taskLists;	// lists of tasks for each vehicle
+public List<Vehicle> vehicles;	// list of vehicles
+public List<List<PD_Action>> plans;	// lists of plans for each vehicle
+public List<List<Task>> taskLists;	// lists of tasks for each vehicle
+
+
 
 public Candidate(List<Vehicle> vehicles, List<List<PD_Action>> plans, List<List<Task>> taskLists, Double cost) {
    this.vehicles = vehicles;
@@ -25,21 +24,52 @@ public Candidate(List<Vehicle> vehicles, List<List<PD_Action>> plans, List<List<
    this.cost = cost;
 }
 
-public Candidate(Candidate candidate) {
-	this.vehicles = candidate.vehicles;
-	this.plans = candidate.plans;
-	this.taskLists = candidate.taskLists;
-	this.cost = candidate.cost;
+
+public Candidate(List<Vehicle> vehicles) {
+	// Initialise plans and tasks variables
+	List<List<PD_Action>> plans = new ArrayList<List<PD_Action>>();
+	List<List<Task>> taskLists = new ArrayList<List<Task>>();
+	// initialize plans and task list
+	for (int i = 0; i < vehicles.size(); i++) {
+		plans.add(new ArrayList<PD_Action>());
+		taskLists.add(new ArrayList<Task>());
+	}
+		
+	this.vehicles = vehicles;
+	this.plans = plans;
+	this.taskLists = taskLists;
+	this.cost = 0.0;
+}
+
+public Candidate(Candidate solution) {
+	this.vehicles = solution.vehicles;
+	this.cost = solution.cost;
+	
+	this.plans = new ArrayList<List<PD_Action>>();
+	for( List<PD_Action> sublist : solution.plans) {
+		plans.add(new ArrayList<PD_Action>(sublist));
+	}
+	
+	this.taskLists = new ArrayList<List<Task>>();
+	for( List<Task> sublist : solution.taskLists) {
+		taskLists.add(new ArrayList<Task>(sublist));
+	}
 }
 
 // MAIN OPERATIONS: Choose neighbours, select initial solution
 
+
 // Function that generates neighbours
 public List<Candidate> ChooseNeighbours(Random random) {
 
+   
    // 1 - GENERATE NEIGHBOURS BY CHANGING VEHICLES OF TASKS
-	List<Candidate> neighs = new ArrayList<>();	// List to hold generated neighbours
 
+   // System.out.println("Generating neighbours by changing vehicles of task");
+	
+	List<Candidate> neighs = new ArrayList<Candidate>();	// List to hold generated neighbours
+   
+   
    int num_vehicles = vehicles.size();
    
    // Loop over all source vehicle ids
@@ -51,25 +81,26 @@ public List<Candidate> ChooseNeighbours(Random random) {
        if (vehicle_tasks.size()==0) {
        	continue;
        }
-       
-       
 
+       //TODO: smarter - not first task but maybe all or most expensive one?
        // Get the first task of the vehicle
-       int task_id = 0;	 
+       int task_id = 0;
        double task_weight = vehicle_tasks.get(task_id).weight;	// Get task weight
        
        // Randomly choose another suitable vehicle
-       int vid_j = random.nextInt(num_vehicles);
-       // Loop until finding a suitable vehicle
+       // int vid_j = random.nextInt(num_vehicles);
+	   int vid_j = findBestVehicleForTask(vehicle_tasks.get(task_id), vid_i);
+
+	   // Loop until finding a suitable vehicle
        while (vid_i == vid_j || vehicles.get(vid_j).capacity() < task_weight) {
        	vid_j = random.nextInt(num_vehicles);
        }
-       
+
 
        // Add a change of t from vehicle i to vehicle j
        neighs.add(ChangingVehicle(random, task_id, vid_i, vid_j));
-    
-       
+
+
        // A potential improvement would be to make this change for each task of the vehicle, not only for the first
        // one (i.e. loop over all task indices instead of taking the first one) and also to give to each possible 
        // other vehicle, resulting in having tried all combinations.
@@ -90,9 +121,10 @@ public List<Candidate> ChooseNeighbours(Random random) {
        if (vehicle_tasks.size()<2) {
        	continue;
        }
-
+       
+       
        // Get a task from the vehicle randomly
-       int task_id = random.nextInt(vehicle_tasks.size());	 
+       int task_id = random.nextInt(vehicle_tasks.size());
        
 
        // Change the position of pickup and delivery actions of the task and add to neighbours
@@ -105,6 +137,8 @@ public List<Candidate> ChooseNeighbours(Random random) {
        
        
    }
+
+ 
    return neighs;
 }
 
@@ -114,15 +148,15 @@ public static Candidate SelectInitialSolution(Random random, List<Vehicle> vehic
 int num_vehicles = vehicles.size();
 
 // Initialise plans and tasks variables
-List<List<PD_Action>> plans = new ArrayList<>();
-List<List<Task>> taskLists = new ArrayList<>();
-List<Task> allTasks = new ArrayList<>(tasks);
+List<List<PD_Action>> plans = new ArrayList<List<PD_Action>>();
+List<List<Task>> taskLists = new ArrayList<List<Task>>();
+List<Task> allTasks = new ArrayList<Task>(tasks);
 
 
 // initialize plans and task list
 for (int i = 0; i < num_vehicles; i++) {
-    plans.add(new ArrayList<>());
-    taskLists.add(new ArrayList<>());
+    plans.add(new ArrayList<PD_Action>());
+    taskLists.add(new ArrayList<Task>());
 }
 
 
@@ -134,6 +168,7 @@ int largest_vehicle = MaxIndex(vehicle_capacities);
      
 // Assign all the tasks to the largest vehicle
 for (Task t : allTasks) {
+    
 	
     List<PD_Action> plan = plans.get(largest_vehicle);
     List<Task> tasks_vehicle = taskLists.get(largest_vehicle);
@@ -157,9 +192,51 @@ Candidate Initial_Solution = new Candidate(vehicles, plans, taskLists, initial_c
 // Return the generated initial candidate solution
 return Initial_Solution;
 }
-		
+
+	// Helper method to find the vehicle that minimizes the cost increase for moving a task
+	private int findBestVehicleForTask(Task task, int sourceVehicleIndex) {
+		int numVehicles = vehicles.size();
+		double minCostIncrease = Double.MAX_VALUE;
+		int bestVehicleIndex = sourceVehicleIndex;
+
+		for (int targetVehicleIndex = 0; targetVehicleIndex < numVehicles; targetVehicleIndex++) {
+			if (targetVehicleIndex != sourceVehicleIndex && vehicles.get(targetVehicleIndex).capacity() >= task.weight) {
+				double costIncrease = computeCostIncreaseForMovingTask(task, sourceVehicleIndex, targetVehicleIndex);
+
+				// Update best vehicle if this results in a lower cost increase
+				if (costIncrease < minCostIncrease) {
+					minCostIncrease = costIncrease;
+					bestVehicleIndex = targetVehicleIndex;
+				}
+			}
+		}
+
+		return bestVehicleIndex;
+	}
+
+
+
+	// Helper method to compute the cost increase for moving a task from sourceVehicle to targetVehicle
+	private double computeCostIncreaseForMovingTask(Task task, int sourceVehicleIndex, int targetVehicleIndex) {
+		Vehicle sourceVehicle = vehicles.get(sourceVehicleIndex);
+		Vehicle targetVehicle = vehicles.get(targetVehicleIndex);
+
+		double sourceVehicleCost = ComputeCost(sourceVehicle, plans.get(sourceVehicleIndex));
+		double targetVehicleCost = ComputeCost(targetVehicle, plans.get(targetVehicleIndex));
+
+		// Assuming no other changes in plans, calculate the cost increase
+		double costIncrease = targetVehicleCost - sourceVehicleCost;
+
+		// Additional logic can be added here if needed
+
+		return costIncrease;
+	}
+
+
 // HELPER FUNCTIONS
 
+
+//helper function for calculating the maximum of an array
 //Method to find the index of maximum element in an array
 public static int MaxIndex( double[] array )
 {
@@ -217,18 +294,27 @@ private static double ComputeCost(Vehicle v, List<PD_Action> plan) {
 			cost = cost + current_city.distanceTo(act.task.deliveryCity) * v.costPerKm();
 			current_city = act.task.deliveryCity;
 		}
-
+  
 	}
    
 	return cost;
 }
+
+
+
+
+
+
+// VEHICLE AND TASK ORDER CHANGE OPERATORS
 
 //Function to change the vehicle of a given task
 public Candidate ChangingVehicle(Random random, int task_id, int vid_i, int vid_j) {
 
 	// Get source (i) and target (j) vehicles
 	Vehicle v_i = vehicles.get(vid_i);
-	Vehicle v_j = vehicles.get(vid_j);
+Vehicle v_j = vehicles.get(vid_j);
+
+
 
 // 1 - Update task lists
 
@@ -240,18 +326,22 @@ List<Task> j_tasks_old = taskLists.get(vid_j);
 Task t = i_tasks_old.get(task_id);
 
 // Create new task list for i by removing the task to change
-List<Task> i_tasks_new = new ArrayList<>(i_tasks_old);
+List<Task> i_tasks_new = new ArrayList<Task>(i_tasks_old);
 i_tasks_new.remove(task_id);	// remove the task
 
 // Create new task list for j by adding the task to change
-List<Task> j_tasks_new = new ArrayList<>(j_tasks_old);
+List<Task> j_tasks_new = new ArrayList<Task>(j_tasks_old);
 j_tasks_new.add(t);	// insert the task to task list
 
 
 // Update the task lists
-List<List<Task>> updated_taskLists = new ArrayList<>(taskLists);
+List<List<Task>> updated_taskLists = new ArrayList<List<Task>>(taskLists);
 updated_taskLists.set(vid_i, i_tasks_new);
 updated_taskLists.set(vid_j, j_tasks_new);
+
+
+
+
 
 // 2 - Update plans
 
@@ -261,7 +351,7 @@ List<PD_Action> j_plan_old = plans.get(vid_j);
 
 
 // Create a new plan for i by removing the task to change
-List<PD_Action> i_plan_new = new ArrayList<>(i_plan_old);
+List<PD_Action> i_plan_new = new ArrayList<PD_Action>(i_plan_old);
 // remove actions associated with the task
 // Loop over all actions in the plan
 	for (int act_ind = 0; act_ind < i_plan_new.size(); ) {
@@ -278,7 +368,7 @@ List<PD_Action> i_plan_new = new ArrayList<>(i_plan_old);
 }
 
 // Create a new plan for j by adding the task to change
-List<PD_Action> j_plan_new = new ArrayList<>(j_plan_old);
+List<PD_Action> j_plan_new = new ArrayList<PD_Action>(j_plan_old);
 
 // insert pickup/delivery actions associated with the task to the beginning of the plan
 j_plan_new.add(0, new PD_Action(false,t));	
@@ -286,37 +376,56 @@ j_plan_new.add(0, new PD_Action(true, t));
 // note that we don't need to check the weight since the vehicle is free initially (assuming capacity is sufficient)
 
 // Insert the new plans of source and target vehicles to the plans of the generated candidate
-List<List<PD_Action>> updated_plans = new ArrayList<>(plans);
+List<List<PD_Action>> updated_plans = new ArrayList<List<PD_Action>>(plans);
 updated_plans.set(vid_i, i_plan_new);
 updated_plans.set(vid_j, j_plan_new);
 
+
+
+
+
 // 3 - Update costs
+
 
 // Compute old costs for both vehicles
 double i_cost_old = ComputeCost(v_i, i_plan_old);
 double j_cost_old = ComputeCost(v_j, j_plan_old);
+
 
 // Compute cost of the new solution
 double i_cost_new = ComputeCost(v_i, i_plan_new);
 double j_cost_new = ComputeCost(v_j, j_plan_new);	
 double updated_cost = this.cost - i_cost_old + i_cost_new - j_cost_old + j_cost_new;	// subtract the old costs and add new costs
 
+
+
 // 4 - Return the generated candidate solution
 return new Candidate(vehicles, updated_plans, updated_taskLists, updated_cost);
 
+
 }
+
+
 
 //Randomly change the place of pickup and delivery actions of one of the tasks in a given vehicle, considering the constraints
 public Candidate ChangingTaskOrder(Random random, int task_id, int vid_i) {
 
-Vehicle v_i = vehicles.get(vid_i);	// retrieve vehicle
+	
+	
+	Vehicle v_i = vehicles.get(vid_i);	// retrieve vehicle
+
 List<Task> vehicle_tasks = taskLists.get(vid_i);	// retrieve task list of vehicles
+
 Task t = vehicle_tasks.get(task_id);	// retrieve task whose order is to be changed
+
 
 // 1 - Update Plans
 
-List<PD_Action> i_plan_old = plans.get(vid_i);	// retrieve old plan of the vehicle
-List<PD_Action> i_plan_new = new ArrayList<>(i_plan_old);	// create template for new plan
+
+List<PD_Action> i_plan_old = plans.get(vid_i);	// retrieve old plan of the vehicle        
+
+
+List<PD_Action> i_plan_new = new ArrayList<PD_Action>(i_plan_old);	// create template for new plan
 
 	// remove pickup/delivery actions associated with the task for new plan
 	// Loop over all actions in the plan
@@ -335,16 +444,16 @@ List<PD_Action> i_plan_new = new ArrayList<>(i_plan_old);	// create template for
 // insert the pickup action to a suitable place
 	int vehicle_capacity = v_i.capacity();
 	int pickup_location = 0;
-	List<PD_Action> candidate_plan_pickup = new ArrayList<>(i_plan_new);
+	List<PD_Action> candidate_plan_pickup = new ArrayList<PD_Action>(i_plan_new);
 
 	// pick a random pickup location
 	boolean done = false;
-	while (!done) {
+	while (done==false) {
 		
 		pickup_location = random.nextInt(i_plan_new.size());    		
 		
 		// add pickup action to candidate plan
-		candidate_plan_pickup = new ArrayList<>(i_plan_new);
+		candidate_plan_pickup = new ArrayList<PD_Action>(i_plan_new);
 		candidate_plan_pickup.add(pickup_location, new PD_Action(true, t));
 		
 		// check if candidate plan satisfies weight condition
@@ -354,17 +463,17 @@ List<PD_Action> i_plan_new = new ArrayList<>(i_plan_old);	// create template for
 	}
 	
 	// insert the delivery action to a suitable place
-		List<PD_Action> candidate_plan_delivery = new ArrayList<>(candidate_plan_pickup);
+		List<PD_Action> candidate_plan_delivery = new ArrayList<PD_Action>(candidate_plan_pickup);
 	// pick a random delivery location
 	done = false;
-	while (!done) {
+	while (done==false) {
 		
 		// do not allow placing before pickup
 		int delivery_location_offset = random.nextInt(i_plan_new.size()-pickup_location);
 		int delivery_location = pickup_location + 1 + delivery_location_offset;
 		
 		// add delivery action to candidate plan
-		candidate_plan_delivery = new ArrayList<>(candidate_plan_pickup);
+		candidate_plan_delivery = new ArrayList<PD_Action>(candidate_plan_pickup);
 		candidate_plan_delivery.add(delivery_location, new PD_Action(false, t));
 		
 		// check if candidate plan satisfies weight condition
@@ -375,17 +484,23 @@ List<PD_Action> i_plan_new = new ArrayList<>(i_plan_old);	// create template for
 	
 	
 	// Set the new plan to the plan after including the delivery action
-	i_plan_new = new ArrayList<>(candidate_plan_delivery);
+	i_plan_new = new ArrayList<PD_Action>(candidate_plan_delivery);
 	
 	
 	// update plans lists
-	List<List<PD_Action>> updated_plans = new ArrayList<>(plans);
+	List<List<PD_Action>> updated_plans = new ArrayList<List<PD_Action>>(plans);
 	updated_plans.set(vid_i, i_plan_new);
+
+	
+	
 
 // 2 - Update costs
 
+
+
 // Compute original values
 double i_cost_old = ComputeCost(v_i, i_plan_old);
+
 
 // Compute new cost and plans
 double i_cost_new = ComputeCost(v_i, i_plan_new);
@@ -393,9 +508,30 @@ double updated_cost = this.cost - i_cost_old + i_cost_new;
 
 return new Candidate(vehicles, updated_plans, taskLists, updated_cost);
 
+
 }
 
-public void updateCost(double cost) {
-	this.cost = cost;
+
+public void addTask(Task t) {
+	// Get the vehicle with the largest capacity
+	double vehicle_capacities[];
+	vehicle_capacities = new double[vehicles.size()];  
+	int largest_vehicle = MaxIndex(vehicle_capacities);
+	     
+	// Assign the new task to the end of the current plan of the largest vehicle
+    this.plans.get(largest_vehicle).add(new PD_Action(true, t));
+    this.plans.get(largest_vehicle).add(new PD_Action(false, t));
+    this.taskLists.get(largest_vehicle).add(t);
+
+	// calculate the cost of augmented solution
+	double new_cost = 0.0;
+	// accumulate the cost borne by each vehicle
+	for (int i = 0; i < vehicles.size(); i++) {
+		new_cost += ComputeCost(vehicles.get(i), plans.get(i));
 	}
+	
+	this.cost = new_cost;
+}
+
+
 }
